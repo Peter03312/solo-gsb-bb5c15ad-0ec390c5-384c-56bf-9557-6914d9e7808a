@@ -1,0 +1,16 @@
+services:
+  triangle-test:
+    build: .
+    image: triangle-test-workbench
+    container_name: triangle-test-workbench
+    ports:
+      - "8000:8000"
+    environment:
+      # SQLite 数据库文件位置（容器内路径，已挂载卷持久化）
+      - DB_PATH=/data/app.db
+    volumes:
+      - triangle-data:/data
+    restart: unless-stopped
+
+volumes:
+  triangle-data:

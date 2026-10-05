@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三角嗅辨盲评</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1f2430; --muted:#6b7280; --line:#e3e6eb;
+          --brand:#2f6fed; --brand-d:#1f56c4; --ok:#047857; --ok-bg:#d1fae5;
+          --warn:#b45309; --warn-bg:#fef3c7; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { background:linear-gradient(135deg,#1e3a8a,#2f6fed); color:#fff; padding:24px 20px; }
+  header h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:0; opacity:.85; font-size:13px; }
+  main { max-width:720px; margin:24px auto 60px; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:22px 24px; margin-bottom:18px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+  h2 { margin:0 0 10px; font-size:17px; }
+  .cups { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:16px 0; }
+  .cup { border:2px solid var(--line); border-radius:12px; padding:26px 10px; text-align:center;
+         cursor:pointer; user-select:none; transition:all .12s; background:#fbfcfe; }
+  .cup .no { font-size:26px; font-weight:800; }
+  .cup .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+  .cup:hover { border-color:#b9ccf5; }
+  .cup.sel { border-color:var(--brand); background:#eef4ff; box-shadow:0 0 0 3px rgba(47,111,237,.18); }
+  button { cursor:pointer; border:0; border-radius:8px; padding:11px 18px; font:inherit;
+           background:var(--brand); color:#fff; font-weight:600; width:100%; }
+  button:hover { background:var(--brand-d); }
+  button:disabled { background:#9ca3af; cursor:not-allowed; }
+  button.abstain { background:#fff; color:var(--warn); border:1px solid #fcd34d; margin-top:10px; }
+  button.abstain:hover { background:var(--warn-bg); }
+  .muted { color:var(--muted); font-size:13px; }
+  .error { color:var(--bad); font-size:13px; min-height:1.2em; }
+  .notice { border-radius:10px; padding:16px 18px; font-size:15px; }
+  .notice.ok { background:var(--ok-bg); color:var(--ok); }
+  .notice.warn { background:var(--warn-bg); color:var(--warn); }
+  .hidden { display:none; }
+  .meta { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;
+          font-size:13px; color:var(--muted); margin-top:6px; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>三角嗅辨盲评</h1>
+  <p>三杯中有两杯为同一样本，请嗅辨并选出与众不同的那一杯</p>
+</header>
+<main>
+  <p class="error" id="fatal"></p>
+
+  <section class="card hidden" id="vote-card">
+    <h2>请选择异样杯</h2>
+    <p class="muted">依次嗅辨三杯样品，点击您认为是<b>异样杯</b>的编号，然后提交。
+      提交后不可修改；如无法判断可选择弃权（弃权不计入有效答卷）。</p>
+    <div class="cups">
+      <div class="cup" data-pos="1"><div class="no">杯 1</div><div class="sub">点击选为异样杯</div></div>
+      <div class="cup" data-pos="2"><div class="no">杯 2</div><div class="sub">点击选为异样杯</div></div>
+      <div class="cup" data-pos="3"><div class="no">杯 3</div><div class="sub">点击选为异样杯</div></div>
+    </div>
+    <button id="submit-btn" disabled>提交选择</button>
+    <button id="abstain-btn" class="abstain">无法判断 · 弃权</button>
+    <p class="error" id="vote-error"></p>
+    <div class="meta">
+      <span>截止时间（本地）：<span id="deadline"></span></span>
+      <span>剩余：<span id="countdown"></span></span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="done-card">
+    <div class="notice ok" id="done-msg"></div>
+    <p class="muted">结果将在实验截止并结算后由负责人统一公布。本页面不会显示对错。</p>
+  </section>
+
+  <section class="card hidden" id="closed-card">
+    <div class="notice warn">⏰ 本实验已过截止时间，未提交的答卷已不再接收。</div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const CODE = location.pathname.split("/").filter(Boolean).pop();
+let selected = null, deadlineTs = null, timer = null;
+
+init();
+
+async function init() {
+  if (!CODE) { $("fatal").textContent = "链接无效：缺少盲评码。"; return; }
+  try {
+    const r = await fetch(`/api/panel/${encodeURIComponent(CODE)}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `加载失败（HTTP ${r.status}）`);
+    deadlineTs = new Date(data.deadline).getTime();
+    $("deadline").textContent = new Date(data.deadline).toLocaleString();
+
+    if (data.status === "submitted") {
+      showDone(data);
+    } else if (data.status === "closed") {
+      $("closed-card").classList.remove("hidden");
+    } else {
+      $("vote-card").classList.remove("hidden");
+      timer = setInterval(tick, 1000);
+      tick();
+    }
+  } catch (e) {
+    $("fatal").textContent = e.message;
+  }
+}
+
+function tick() {
+  const ms = deadlineTs - Date.now();
+  if (ms <= 0) {
+    clearInterval(timer);
+    location.reload();   // 已到截止时间，刷新以进入截止状态
+    return;
+  }
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  $("countdown").textContent =
+    (h ? h + " 小时 " : "") + m + " 分 " + String(ss).padStart(2, "0") + " 秒";
+}
+
+document.querySelectorAll(".cup").forEach(el => {
+  el.addEventListener("click", () => {
+    document.querySelectorAll(".cup").forEach(x => x.classList.remove("sel"));
+    el.classList.add("sel");
+    selected = parseInt(el.dataset.pos, 10);
+    $("submit-btn").disabled = false;
+    $("submit-btn").textContent = `提交：杯 ${selected} 为异样杯`;
+  });
+});
+
+$("submit-btn").onclick = () => {
+  if (selected === null) return;
+  if (!confirm(`确认选择「杯 ${selected}」为异样杯？提交后不可修改。`)) return;
+  submit({ choice: selected });
+};
+
+$("abstain-btn").onclick = () => {
+  if (!confirm("确认弃权？弃权不计入有效答卷，且提交后不可修改。")) return;
+  submit({ abstain: true });
+};
+
+async function submit(payload) {
+  $("submit-btn").disabled = true;
+  $("abstain-btn").disabled = true;
+  $("vote-error").textContent = "";
+  try {
+    const r = await fetch(`/api/panel/${encodeURIComponent(CODE)}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `提交失败（HTTP ${r.status}）`);
+    clearInterval(timer);
+    showDone({ abstained: !!payload.abstain, my_choice: payload.choice ?? null });
+  } catch (e) {
+    $("vote-error").textContent = e.message;
+    $("abstain-btn").disabled = false;
+    if (selected !== null) $("submit-btn").disabled = false;
+    // 若因已提交/已截止被拒，刷新状态
+    setTimeout(() => location.reload(), 1500);
+  }
+}
+
+function showDone(data) {
+  $("vote-card").classList.add("hidden");
+  $("closed-card").classList.add("hidden");
+  const msg = data.abstained
+    ? "✅ 已提交：弃权。感谢您的参与。"
+    : `✅ 已提交：您选择的异样杯为「杯 ${data.my_choice}」。答卷已锁定，不可修改。`;
+  $("done-msg").textContent = msg;
+  $("done-card").classList.remove("hidden");
+}
+</script>
+</body>
+</html>

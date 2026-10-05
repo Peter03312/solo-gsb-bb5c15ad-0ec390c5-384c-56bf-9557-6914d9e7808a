@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三角嗅辨盲评工作台</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1f2430; --muted:#6b7280; --line:#e3e6eb;
+          --brand:#2f6fed; --brand-d:#1f56c4; --warn:#b45309; --warn-bg:#fef3c7; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { background:linear-gradient(135deg,#1e3a8a,#2f6fed); color:#fff; padding:28px 20px; }
+  header h1 { margin:0 0 4px; font-size:22px; }
+  header p { margin:0; opacity:.85; font-size:14px; }
+  main { max-width:860px; margin:24px auto 60px; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:22px 24px; margin-bottom:20px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+  h2 { margin:0 0 14px; font-size:18px; }
+  h3 { margin:18px 0 8px; font-size:15px; }
+  label { display:block; margin:12px 0 4px; font-weight:600; font-size:14px; }
+  label .hint { font-weight:400; color:var(--muted); font-size:12px; }
+  input, textarea { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px;
+                    font:inherit; background:#fff; }
+  input:focus, textarea:focus { outline:2px solid rgba(47,111,237,.35); border-color:var(--brand); }
+  button { cursor:pointer; border:0; border-radius:8px; padding:10px 18px; font:inherit;
+           background:var(--brand); color:#fff; font-weight:600; }
+  button:hover { background:var(--brand-d); }
+  button.ghost { background:#eef2fb; color:var(--brand); padding:6px 12px; font-size:13px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:0 18px; }
+  @media (max-width:640px){ .row{grid-template-columns:1fr;} }
+  .muted { color:var(--muted); font-size:13px; }
+  .error { color:#b91c1c; font-size:13px; min-height:1.2em; }
+  .warnbox { background:var(--warn-bg); color:var(--warn); border:1px solid #fcd34d;
+             border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:8px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .code-pill { display:inline-block; background:#f1f5ff; border:1px solid #c7d6fb; border-radius:6px;
+               padding:2px 8px; font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:700; }
+  .hidden { display:none; }
+  .linkline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  .linkline a { word-break:break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>三角嗅辨盲评工作台</h1>
+  <p>三点检验法：比较两种气味样本是否可辨 · 每员三杯、两同一异、凭码单次作答</p>
+</header>
+<main>
+  <section class="card" id="create-card">
+    <h2>新建盲评实验</h2>
+    <form id="create-form">
+      <div class="row">
+        <div>
+          <label for="sample_a">样本 A 编号</label>
+          <input id="sample_a" name="sample_a" required maxlength="100" placeholder="如：A-2026-001">
+        </div>
+        <div>
+          <label for="sample_b">样本 B 编号</label>
+          <input id="sample_b" name="sample_b" required maxlength="100" placeholder="如：B-2026-002">
+        </div>
+      </div>
+      <label for="panelists">评员名单 <span class="hint">每行一人，重名自动去重</span></label>
+      <textarea id="panelists" name="panelists" rows="6" required
+        placeholder="张三&#10;李四&#10;王五&#10;赵六&#10;钱七&#10;孙八"></textarea>
+      <div class="row">
+        <div>
+          <label for="deadline">截止时间 <span class="hint">以服务器收到的时间为准</span></label>
+          <input id="deadline" name="deadline" type="datetime-local" required>
+        </div>
+        <div>
+          <label for="min_valid">最少有效答卷数 <span class="hint">弃权不计入</span></label>
+          <input id="min_valid" name="min_valid" type="number" min="1" value="6" required>
+        </div>
+      </div>
+      <p style="margin:18px 0 4px;"><button type="submit" id="submit-btn">创建实验并生成盲评码</button></p>
+      <p class="error" id="create-error"></p>
+    </form>
+  </section>
+
+  <section class="card hidden" id="done-card">
+    <h2>✅ 实验已创建</h2>
+    <div class="warnbox">
+      ⚠️ 请<b>立即保存管理链接</b>（内含管理令牌，丢失无法找回），并将盲评码<b>逐一私下</b>分发给对应评员。
+      盲评码仅本人可用，每人只能提交一次。
+    </div>
+    <h3>负责人管理入口</h3>
+    <div class="linkline">
+      <a id="admin-link" href="#" target="_blank" rel="noopener"></a>
+      <button type="button" class="ghost" id="copy-admin">复制链接</button>
+    </div>
+    <h3>评员盲评码（<span id="code-count"></span> 人）</h3>
+    <table>
+      <thead><tr><th>评员</th><th>盲评码</th><th>评员入口</th><th></th></tr></thead>
+      <tbody id="codes-body"></tbody>
+    </table>
+    <p class="muted">提示：评员入口链接中已包含盲评码，可直接整链分发；也可只告知盲评码，由评员在入口页输入。</p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// 默认截止时间：当前时间 +1 小时
+(() => {
+  const d = new Date(Date.now() + 3600e3);
+  d.setSeconds(0, 0);
+  const pad = (x) => String(x).padStart(2, "0");
+  $("deadline").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
+$("create-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("create-error").textContent = "";
+  $("submit-btn").disabled = true;
+  try {
+    const names = $("panelists").value.split("\n").map(s => s.trim()).filter(Boolean);
+    const payload = {
+      sample_a: $("sample_a").value.trim(),
+      sample_b: $("sample_b").value.trim(),
+      panelists: names,
+      deadline: new Date($("deadline").value).toISOString(),
+      min_valid: parseInt($("min_valid").value, 10),
+    };
+    const r = await fetch("/api/experiments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `创建失败（HTTP ${r.status}）`);
+    renderDone(data);
+  } catch (e) {
+    $("create-error").textContent = e.message;
+  } finally {
+    $("submit-btn").disabled = false;
+  }
+});
+
+function renderDone(data) {
+  const adminUrl = location.origin + data.admin_path;
+  const link = $("admin-link");
+  link.href = adminUrl;
+  link.textContent = adminUrl;
+  $("copy-admin").onclick = () => navigator.clipboard.writeText(adminUrl);
+
+  $("code-count").textContent = data.panelists.length;
+  const body = $("codes-body");
+  body.innerHTML = "";
+  for (const p of data.panelists) {
+    const url = location.origin + p.test_path;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td></td>
+      <td><span class="code-pill"></span></td>
+      <td class="mono" style="font-size:12px;word-break:break-all;"></td>
+      <td><button type="button" class="ghost">复制链接</button></td>`;
+    tr.children[0].textContent = p.name;
+    tr.querySelector(".code-pill").textContent = p.code;
+    tr.children[2].textContent = url;
+    tr.querySelector("button").onclick = () => navigator.clipboard.writeText(url);
+    body.appendChild(tr);
+  }
+  $("done-card").classList.remove("hidden");
+  $("done-card").scrollIntoView({ behavior: "smooth" });
+}
+</script>
+</body>
+</html>
